@@ -1,110 +1,54 @@
 # Moji HA Voice
 
-ESPHome-конфигурация голосового спутника Home Assistant для **Movecall Moji ESP32-S3**.
+ESPHome voice satellite configuration for the **Movecall Moji ESP32-S3** with Home Assistant Assist.
 
-Проект предназначен для постоянной работы устройства в роли микрофона и динамика Home Assistant Assist:
+The project was tested on the target device with:
 
-- локальное обнаружение wake word `okay_nabu`;
-- запись команды через микрофон Moji;
-- обработка команды в Home Assistant;
-- озвучивание ответа через динамик устройства.
-
-## Проверенная конфигурация
-
-Проект проверен на целевом устройстве со следующими компонентами:
-
-- ESP32-S3;
-- flash-память 16 МБ;
-- PSRAM 8 МБ;
-- аудиокодек ES8311;
-- wake word `okay_nabu`;
+- ESP32-S3, 16 MB flash, 8 MB PSRAM;
+- ES8311 audio codec;
+- `okay_nabu` micro wake word;
 - Home Assistant Voice Assistant;
-- Whisper/faster-whisper для STT;
-- YandexGPT для диалога;
-- Piper для TTS.
+- Whisper STT, YandexGPT conversation and Piper TTS on the Home Assistant host.
 
-Итоговая прошивка была успешно собрана и установлена по OTA. После установки устройство подключилось к Wi-Fi и Home Assistant и прошло полный голосовой цикл:
+## Hardware and pinout
 
-```text
-listening → processing → responding → idle
-```
-
-## Состав репозитория
-
-| Файл | Назначение |
-|---|---|
-| `moji.yaml` | Итоговая ESPHome-конфигурация устройства |
-| `secrets.yaml.example` | Шаблон локальных секретов |
-| `.gitignore` | Исключение секретов, сборки и бинарных файлов |
-| `LICENSE` | Лицензия MIT |
-
-Файл `secrets.yaml` в репозиторий не включается.
-
-## Аппаратная распиновка
-
-| Назначение | GPIO |
+| Function | GPIO |
 |---|---:|
 | ES8311 I2C SDA | 5 |
 | ES8311 I2C SCL | 4 |
 | I2S MCLK | 6 |
 | I2S BCLK | 14 |
 | I2S LRCLK/WS | 12 |
-| Данные микрофона, DIN | 13 |
-| Данные динамика, DOUT | 11 |
-| Включение усилителя | 9 |
-| Пользовательская кнопка | 0 |
-| Статусный светодиод WS2812 | 21 |
-| Адрес ES8311 на I2C | `0x18` |
+| Microphone DIN | 13 |
+| Speaker DOUT | 11 |
+| Amplifier enable | 9 |
+| User button | 0 |
+| Status WS2812 LED | 21 |
+| ES8311 address | `0x18` |
 
-### Важная настройка микрофона
+The microphone path is an external analog ES8311 path. Keep `use_microphone: false`; enabling PDM mode produces unusable audio on this device.
 
-В Moji используется внешний аналоговый тракт микрофона через ES8311. Поэтому в конфигурации обязательно оставлено:
+## Important: power
 
-```yaml
-use_microphone: false
-```
+Moji must be connected to a stable USB power source for continuous operation. The tested board does not expose a usable battery-level or charging-status input to this ESPHome configuration. An uptime reset after disappearance indicates a restart or power loss; it does not by itself prove a firmware hang.
 
-Включение режима PDM для этого устройства приводит к практически плоскому аудиосигналу и некорректной работе Whisper.
+## Local setup
 
-## Питание
-
-Для непрерывной работы Moji необходимо подключать к стабильному источнику питания через USB.
-
-В протестированной версии платы нет доступного для этой ESPHome-конфигурации входа, по которому можно было бы определить уровень заряда аккумулятора или факт подключения зарядки. Поэтому Home Assistant не может показать достоверный заряд батареи устройства.
-
-Если устройство исчезло из сети, а после подключения USB загрузилось с нулевым `Moji Uptime`, наиболее вероятна потеря питания или перезапуск. Один только сброс uptime не доказывает зависание прошивки.
-
-## Подготовка секретов
-
-Скопируйте шаблон и заполните его только локально:
+Install ESPHome or use the official ESPHome Docker image. Copy the example secrets file:
 
 ```sh
 cp secrets.yaml.example secrets.yaml
+# edit secrets.yaml locally; never commit it
 ```
 
-В `secrets.yaml` должны быть определены Wi-Fi-данные, OTA-пароль и пароль резервной точки доступа. Не публикуйте этот файл и не вставляйте секреты в `moji.yaml`.
-
-## Проверка и сборка
-
-Проверка конфигурации и обычная сборка:
+Compile and validate:
 
 ```sh
 esphome config moji.yaml
 esphome compile moji.yaml
 ```
 
-Для сборки в Docker:
-
-```sh
-docker run --rm --name moji-build \
-  -v esphome-cache:/root/.cache/esphome \
-  -v "$PWD":/config \
-  esphome/esphome:latest compile /config/moji.yaml
-```
-
-### Сборка на Rock Pi с ограничением памяти
-
-При сборке ESPHome с ESP-IDF Ninja может запустить слишком много параллельных задач. В проверенной конфигурации сборка выполнялась с одним заданием Ninja (`-j1`):
+For a low-memory Rock Pi build, run Ninja with one job. One tested Docker pattern is:
 
 ```sh
 docker run --rm --name moji-build --entrypoint /bin/sh \
@@ -117,73 +61,59 @@ docker run --rm --name moji-build --entrypoint /bin/sh \
       esphome compile /config/moji.yaml'
 ```
 
-Ограничение `-j1` уменьшает пиковое потребление памяти и не меняет результат сборки.
+## Upload
 
-## Установка по OTA
-
-Устройство должно быть включено и уже находиться в сети:
+After a successful compile and while the device is already online:
 
 ```sh
 esphome upload moji.yaml --device DEVICE_IP
 ```
 
-Вместо `DEVICE_IP` укажите локальный адрес устройства. Реальный адрес намеренно не хранится в публичном репозитории. Первую установку или восстановление после недоступности OTA можно выполнять через USB.
+Do not put real IP addresses, Wi-Fi credentials, API keys or OTA passwords into the repository.
 
-## Home Assistant и голосовой конвейер
+## Home Assistant voice pipeline
 
-Moji использует ESPHome Voice Assistant и передаёт команды в Home Assistant. Проверенная схема:
+The device uses the Home Assistant Assist pipeline. The tested server-side arrangement was:
 
-1. **Whisper/faster-whisper** преобразует речь в текст.
-2. **YandexGPT** формирует ответ через conversation-интеграцию.
-3. **Piper** преобразует ответ в речь.
-4. Home Assistant отправляет аудио обратно на Moji.
+- Whisper/faster-whisper for speech-to-text;
+- YandexGPT through the Home Assistant conversation integration;
+- Piper for text-to-speech;
+- Home Assistant Container on a Linux host.
 
-В Home Assistant необходимо настроить STT, conversation и TTS, выбрать Assist pipeline и назначить его голосовому спутнику Moji. Имена контейнеров, адреса серверов и ключи зависят от конкретной установки и не записаны в репозитории.
+Configure these services in Home Assistant and select the resulting pipeline for the Moji satellite. The exact hostnames and credentials are deployment-specific and intentionally omitted here.
 
-## Как работает wake word
+## Diagnostics
 
-1. ESP32-S3 локально слушает `okay_nabu`.
-2. После обнаружения wake word детектор останавливается.
-3. Voice Assistant записывает команду и отправляет её в Home Assistant.
-4. Ответ воспроизводится через динамик Moji.
-5. После завершения или ошибки детектор запускается снова.
+The configuration exposes:
 
-Кнопка устройства запускает ручную запись без ожидания wake word; при отпускании запись прекращается.
+- Wi-Fi signal;
+- uptime;
+- restart button;
+- status LED;
+- amplifier enable internally;
+- user button for push-to-talk.
 
-## Диагностика в Home Assistant
+Wake word flow:
 
-Конфигурация создаёт сущности:
+1. `okay_nabu` is continuously detected locally.
+2. The wake-word detector stops.
+3. Voice Assistant records and sends the request to Home Assistant.
+4. On completion or error, wake-word detection starts again.
 
-- **Moji WiFi Signal** — уровень сигнала Wi-Fi;
-- **Moji Uptime** — время с момента загрузки;
-- **Moji Restart** — программный перезапуск;
-- **Moji Status LED** — статусный светодиод;
-- **Moji Button** — пользовательская кнопка.
+## Verification record
 
-Усилитель включается внутренним GPIO-переключателем. Цвет статусного светодиода: зелёный — голосовая обработка, красный — ошибка, выключен — ожидание wake word.
+The tested final firmware compiled successfully and uploaded over OTA. After upload the device answered on the ESPHome API, reconnected to Wi-Fi, and completed a full Assist cycle (`listening` → `processing` → `responding` → `idle`).
 
-## Устранение неполадок
+## Safety and publication scope
 
-### Устройство не слышит wake word
+This public repository intentionally excludes:
 
-Проверьте питание, `use_microphone: false`, распиновку GPIO13/6/14/12, доступность устройства в Home Assistant и выбранный Assist pipeline.
+- Wi-Fi, Home Assistant and YandexGPT credentials;
+- factory flash backups;
+- private IP and MAC addresses;
+- local logs and build output;
+- unrelated files from the working directory.
 
-### Whisper распознаёт бессмысленный текст
+## License
 
-Не включайте PDM-режим микрофона. Проверьте ES8311 и частоту дискретизации 16 кГц.
-
-### Устройство исчезает из сети
-
-Проверьте USB-питание и кабель, затем посмотрите `Moji Uptime`. Сброс uptime означает перезапуск или потерю питания; без сброса следует исследовать сеть и доступность API.
-
-### Сборка завершается нехваткой памяти
-
-Используйте Docker-команду с ограничением Ninja до одного параллельного задания (`-j1`). Остановка рабочих контейнеров Home Assistant для этого не требуется, если на хосте достаточно свободной памяти.
-
-## Границы публикации
-
-В публичный репозиторий намеренно не включены Wi-Fi-пароли, ключи Home Assistant и YandexGPT, OTA-пароль, заводская резервная копия flash, реальные IP- и MAC-адреса, локальные логи, результаты сборки и несвязанные файлы.
-
-## Лицензия
-
-Проект распространяется по лицензии MIT. Текст лицензии находится в файле [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
